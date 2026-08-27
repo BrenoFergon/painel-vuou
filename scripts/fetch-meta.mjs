@@ -1,0 +1,259 @@
+// fetch-meta.mjs — puxa a Meta Marketing API e reescreve ../data.json
+// Rodado pelo GitHub Actions. Node 20+ (fetch global).
+// Env: META_TOKEN (obrigatória) · AD_ACCOUNT_ID, SINCE (opcionais)
+
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const TOKEN   = process.env.META_TOKEN;
+const ACCOUNT = process.env.AD_ACCOUNT_ID || "1337690884685109";
+const SINCE   = process.env.SINCE || "2026-08-24";
+const API     = "https://graph.facebook.com/v21.0";
+
+const ROOT     = join(dirname(fileURLToPath(import.meta.url)), "..");
+const OUT      = join(ROOT, "data.json");
+const THUMBDIR = join(ROOT, "thumbs");
+
+if (!TOKEN) { console.error("ERRO: defina o secret META_TOKEN."); process.exit(1); }
+
+/* ── campanhas monitoradas ───────────────────────────────────────────────
+   Para trocar/adicionar campanha: edite este bloco (é a única coisa que o
+   painel precisa saber sobre a estratégia). `kpi` é a chave da métrica
+   principal dentro de cada linha diária.                                  */
+const PLAN = [
+  { id: "120247500090530489", key: "C1", tag: "C1",
+    label: "Tráfego · Visitas ao Perfil e Seguidores",
+    goal: "Levar público novo ao perfil da Vuou e converter em seguidor.",
+    // primário = visitas ao perfil (é o que a Meta otimiza aqui e o que tem volume).
+    // Quando a base de seguidores crescer, basta trocar kpi/kpi2 de lugar.
+    kpi: "res", kpi_label: "Visitas ao perfil", kpi_unit: "visita",
+    kpi2: "fol", kpi2_label: "Seguidores",      kpi2_unit: "seguidor" },
+
+  // ── quando entrarem, é só descomentar e pôr o id da campanha ──
+  // { id: "TROCAR", key: "C2", tag: "C2",
+  //   label: "Reconhecimento · Visualização de Vídeo",
+  //   goal: "Fazer o vídeo ser assistido — meta principal: quem vê pelo menos 50%.",
+  //   kpi: "p50", kpi_label: "Viram 50%+ do vídeo", kpi_unit: "visualização 50%",
+  //   kpi2: "tp", kpi2_label: "ThruPlay", kpi2_unit: "ThruPlay" },
+  // { id: "TROCAR", key: "C3", tag: "C3",
+  //   label: "Conversas Iniciadas",
+  //   goal: "Transformar interesse em conversa no direct/WhatsApp.",
+  //   kpi: "conv", kpi_label: "Conversas iniciadas", kpi_unit: "conversa",
+  //   kpi2: "conn", kpi2_label: "Conexões de mensagem", kpi2_unit: "conexão" },
+];
+const WATCHED = PLAN.map(p => p.id);
+
+/* ── helpers ─────────────────────────────────────────────────────────── */
+async function getAll(path, params) {
+  const url = new URL(`${API}/${path}`);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  url.searchParams.set("access_token", TOKEN);
+  if (!params.limit) url.searchParams.set("limit", "500");
+  let out = [], next = url.toString(), guard = 0;
+  while (next && guard++ < 200) {
+    const r = await fetch(next);
+    const j = await r.json();
+    if (j.error) throw new Error(`${path}: ${j.error.message}`);
+    out = out.concat(j.data || []);
+    next = j.paging?.next || null;
+  }
+  return out;
+}
+
+const num = v => (v == null ? 0 : Math.round(parseFloat(v) || 0));
+const sumArr = a => Array.isArray(a) ? a.reduce((s, x) => s + num(x.value), 0) : num(a);
+
+/* soma TODOS os action_types que casam com a lista (evita perder variações
+   de nome que a Meta troca de tempos em tempos) */
+function pick(actions, types) {
+  if (!Array.isArray(actions)) return 0;
+  for (const t of types) {
+    const hit = actions.find(a => a.action_type === t);
+    if (hit) return num(hit.value);
+  }
+  return 0;
+}
+
+const IF = [
+  "ad_id", "ad_name", "campaign_id", "adset_id", "spend", "impressions", "reach", "clicks",
+  "actions", "video_thruplay_watched_actions", "video_p25_watched_actions",
+  "video_p50_watched_actions", "video_p75_watched_actions", "video_p100_watched_actions",
+  "video_play_actions",
+].join(",");
+
+/* mapeia uma linha da API para o formato compacto do painel */
+function toRow(r) {
+  const a = r.actions || [];
+  const o = {
+    d: r.date_start,
+    a: r.ad_id,
+    c: r.campaign_id,
+    s: +(+r.spend).toFixed(2),
+    i: num(r.impressions),
+    rc: num(r.reach),
+    ck: num(r.clicks),
+  };
+
+  // resultado nativo da campanha (o que a Meta chama de "resultado")
+  const visits = pick(a, ["onsite_conversion.ig_profile_visit", "profile_visit_view", "onsite_conversion.ig_profile_engagement"]);
+  const follows = pick(a, ["onsite_conversion.follow", "instagram_profile_follow_v2", "onsite_conversion.ig_profile_follow", "follow"]);
+  const lc = pick(a, ["link_click"]);
+
+  const tp   = sumArr(r.video_thruplay_watched_actions);
+  const p50  = sumArr(r.video_p50_watched_actions);
+  const p75  = sumArr(r.video_p75_watched_actions);
+  const p100 = sumArr(r.video_p100_watched_actions);
+  const pl   = sumArr(r.video_play_actions);
+
+  // resultado padrão por objetivo da campanha
+  const plan = PLAN.find(p => p.id === r.campaign_id);
+  o.res = plan?.key === "C2" ? tp : visits;
+
+  if (follows) o.fol = follows;
+  if (lc)   o.lc = lc;
+  if (tp)   o.tp = tp;
+  if (p50)  o.p50 = p50;
+  if (p75)  o.p75 = p75;
+  if (p100) o.p100 = p100;
+  if (pl)   o.pl = pl;
+
+  // funil de mensagens
+  const m = {};
+  const MSG = {
+    conv: ["onsite_conversion.messaging_conversation_started_7d"],
+    conn: ["onsite_conversion.total_messaging_connection"],
+    welc: ["onsite_conversion.messaging_welcome_message_view"],
+    repl: ["onsite_conversion.messaging_first_reply"],
+    rep7: ["onsite_conversion.messaging_conversation_replied_7d"],
+    d2:   ["onsite_conversion.messaging_user_depth_2_message_send"],
+    d3:   ["onsite_conversion.messaging_user_depth_3_message_send"],
+    d5:   ["onsite_conversion.messaging_user_depth_5_message_send"],
+  };
+  for (const [k, types] of Object.entries(MSG)) {
+    const v = pick(a, types);
+    if (v) m[k] = v;
+  }
+  if (Object.keys(m).length) o.m = m;
+
+  if (plan?.key === "C3") o.res = m.conv || 0;
+  return o;
+}
+
+/* ── main ────────────────────────────────────────────────────────────── */
+async function main() {
+  const until = new Date().toISOString().slice(0, 10);
+  const time_range = JSON.stringify({ since: SINCE, until });
+
+  const campMeta = await getAll(`act_${ACCOUNT}/campaigns`, {
+    fields: "id,name,objective,effective_status,daily_budget",
+  });
+  const adMeta = await getAll(`act_${ACCOUNT}/ads`, {
+    fields: "id,name,campaign_id,effective_status,creative{id}",
+  });
+
+  const campById = Object.fromEntries(campMeta.map(c => [c.id, c]));
+  const adById   = Object.fromEntries(adMeta.map(a => [a.id, a]));
+
+  // insights diários por anúncio, só das campanhas monitoradas
+  const rows = await getAll(`act_${ACCOUNT}/insights`, {
+    level: "ad",
+    time_range,
+    time_increment: "1",
+    fields: IF,
+    filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: WATCHED }]),
+  });
+
+  const daily = rows
+    .filter(r => parseFloat(r.spend) > 0)
+    .map(toRow)
+    .sort((x, y) => x.d < y.d ? -1 : x.d > y.d ? 1 : 0);
+
+  if (!daily.length) throw new Error("nenhuma linha com gasto — confira o token e o AD_ACCOUNT_ID");
+
+  const usedAds = [...new Set(daily.map(r => r.a))];
+
+  // capas dos criativos → thumbs/<ad_id>.jpg
+  // O data.json semeado trouxe capas de 160px (limite do que dá para pegar sem token).
+  // Na primeira rodada com token, `thumbs_lowres` força a troca por 400px.
+  const prevSeed = existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8")) : null;
+  const forceThumbs = prevSeed?.meta?.thumbs_lowres === true;
+  mkdirSync(THUMBDIR, { recursive: true });
+  const imgMap = {};
+  let baixadas = 0;
+  for (const adId of usedAds) {
+    const file = join(THUMBDIR, adId + ".jpg"), rel = "thumbs/" + adId + ".jpg";
+    if (existsSync(file) && !forceThumbs) { imgMap[adId] = rel; continue; }
+    const cid = adById[adId]?.creative?.id;
+    if (!cid) continue;
+    try {
+      const j = await (await fetch(`${API}/${cid}?fields=thumbnail_url&thumbnail_width=200&thumbnail_height=200&access_token=${TOKEN}`)).json();
+      if (!j.thumbnail_url) continue;
+      const ir = await fetch(j.thumbnail_url);
+      if (!ir.ok) continue;
+      writeFileSync(file, Buffer.from(await ir.arrayBuffer()));
+      imgMap[adId] = rel; baixadas++;
+    } catch { /* segue sem capa */ }
+    // se a troca falhou mas já existe uma capa em disco, mantém a antiga
+    if (!imgMap[adId] && existsSync(file)) imgMap[adId] = rel;
+  }
+
+  const ads = usedAds.map(id => {
+    const a = adById[id] || {};
+    const o = {
+      id,
+      name: a.name || id,
+      campaign_id: daily.find(r => r.a === id).c,
+      status: a.effective_status || "PAUSED",
+    };
+    if (imgMap[id]) o.img = imgMap[id];
+    return o;
+  }).sort((x, y) => x.name.localeCompare(y.name));
+
+  const campaigns = PLAN.map(p => {
+    const c = campById[p.id] || {};
+    return {
+      id: p.id, key: p.key, tag: p.tag,
+      name: c.name || p.label,
+      label: p.label, goal: p.goal,
+      objective: c.objective || "",
+      status: c.effective_status === "ACTIVE" ? "ACTIVE" : (c.effective_status || "PAUSED"),
+      daily_budget: c.daily_budget ? Math.round(+c.daily_budget / 100) : null,
+      kpi: p.kpi, kpi_label: p.kpi_label, kpi_unit: p.kpi_unit,
+      kpi2: p.kpi2, kpi2_label: p.kpi2_label, kpi2_unit: p.kpi2_unit,
+    };
+  });
+
+  const dates = daily.map(r => r.d);
+
+  const data = {
+    meta: {
+      account_id: ACCOUNT,
+      account_name: "Vuou - 01",
+      client: "Vuou",
+      client_sub: "Passagens aéreas",
+      currency: "BRL",
+      tz: "America/Sao_Paulo",
+      updated_at: new Date().toISOString(),
+      seed: false,
+      first_date: dates[0],
+      last_date: dates[dates.length - 1],
+      default_period: prevSeed?.meta?.default_period || "last_30d",
+    },
+    campaigns, ads, daily,
+  };
+
+  writeFileSync(OUT, JSON.stringify(data) + "\n");
+
+  const tot = daily.reduce((s, r) => s + r.s, 0);
+  console.log(`OK  linhas=${daily.length}  anúncios=${ads.length}  capas novas=${baixadas}`);
+  console.log(`    período ${data.meta.first_date} → ${data.meta.last_date}  investido R$${tot.toFixed(2)}`);
+  for (const c of campaigns) {
+    const rs = daily.filter(r => r.c === c.id);
+    const sp = rs.reduce((s, r) => s + r.s, 0);
+    const kv = rs.reduce((s, r) => s + (r.m?.[c.kpi] ?? r[c.kpi] ?? 0), 0);
+    console.log(`    ${c.tag} R$${sp.toFixed(2).padStart(9)}  ${c.kpi_label}: ${kv}`);
+  }
+}
+
+main().catch(e => { console.error("FALHA:", e.message); process.exit(1); });
