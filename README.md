@@ -31,6 +31,16 @@ O `PLAN` no topo de `scripts/fetch-meta.mjs` já tem os blocos de **C2 (visualiz
 
 O painel também aceita campanhas fora do padrão C1/C2/C3: basta acrescentar uma entrada no `PLAN` com o `kpi` que fizer sentido.
 
+## Alcance: por que ele não aparece em intervalo personalizado
+
+Alcance é **gente única**. Quem vê o anúncio em três dias é uma pessoa, não três — então o alcance de um período **não é a soma dos dias**. Somar inflava o número em até 90% na visão "Tudo".
+
+Por isso o painel busca na Meta o alcance real de **cada atalho de período** (último dia, 7, 30, 90 dias, este mês, tudo), por conta e por campanha, e guarda em `data.json` → `reach.windows`. Quando você escolhe um atalho, o número exibido é o oficial da Meta.
+
+Em **intervalo de datas personalizado** o alcance aparece como **—**, porque calcular gente única num intervalo arbitrário exige uma nova consulta à API. Inventar uma estimativa ali seria pior que não mostrar. Todo o resto — investimento, impressões, cliques, resultados e o ranking de criativos — continua funcionando normalmente em qualquer intervalo.
+
+A frequência (impressões ÷ alcance) segue a mesma regra.
+
 ## Filtro de período
 
 - **Atalhos:** último dia, 7, 30, 90 dias, este mês, tudo.

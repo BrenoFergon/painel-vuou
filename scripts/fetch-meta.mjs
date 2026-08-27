@@ -140,6 +140,39 @@ function toRow(r) {
   return o;
 }
 
+
+/* ── alcance real por janela ──────────────────────────────────────────────
+   Alcance é gente ÚNICA: não pode ser somado entre dias nem entre campanhas.
+   Então buscamos o número pronto na Meta para cada atalho de período que o
+   painel oferece. Intervalo personalizado fica sem alcance (mostra "—").     */
+function janelas(first, last) {
+  const d = x => { const y = new Date(last + "T12:00:00"); y.setDate(y.getDate() - (x - 1)); return y.toISOString().slice(0, 10); };
+  return {
+    today:      { from: last,                    until: last },
+    last_7d:    { from: d(7),                    until: last },
+    last_30d:   { from: d(30),                   until: last },
+    last_90d:   { from: d(90),                   until: last },
+    this_month: { from: last.slice(0, 7) + "-01", until: last },
+    all:        { from: first,                   until: last },
+  };
+}
+
+async function alcancePorJanela(first, last) {
+  const ws = janelas(first, last), out = {};
+  for (const [nome, w] of Object.entries(ws)) {
+    const time_range = JSON.stringify({ since: w.from, until: w.until });
+    const [acct] = await getAll(`act_${ACCOUNT}/insights`, { level: "account", time_range, fields: "reach" });
+    const camps = await getAll(`act_${ACCOUNT}/insights`, {
+      level: "campaign", time_range, fields: "campaign_id,reach",
+      filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: WATCHED }]),
+    });
+    const c = {};
+    for (const r of camps) c[r.campaign_id] = num(r.reach);
+    out[nome] = { from: w.from, until: w.until, acc: num(acct?.reach), c };
+  }
+  return { fetched_at: new Date().toISOString(), windows: out };
+}
+
 /* ── main ────────────────────────────────────────────────────────────── */
 async function main() {
   const until = new Date().toISOString().slice(0, 10);
@@ -225,6 +258,7 @@ async function main() {
   });
 
   const dates = daily.map(r => r.d);
+  const reach = await alcancePorJanela(dates[0], dates[dates.length - 1]);
 
   const data = {
     meta: {
@@ -238,9 +272,11 @@ async function main() {
       seed: false,
       first_date: dates[0],
       last_date: dates[dates.length - 1],
-      default_period: prevSeed?.meta?.default_period || "last_30d",
+      default_period: prevSeed?.meta?.default_period || "all",
+      // capas já vêm em 400px daqui em diante; a marca do seed sai
+      ...(forceThumbs ? {} : (prevSeed?.meta?.thumbs_lowres ? { thumbs_lowres: true } : {})),
     },
-    campaigns, ads, daily,
+    campaigns, ads, daily, reach,
   };
 
   writeFileSync(OUT, JSON.stringify(data) + "\n");
@@ -248,6 +284,7 @@ async function main() {
   const tot = daily.reduce((s, r) => s + r.s, 0);
   console.log(`OK  linhas=${daily.length}  anúncios=${ads.length}  capas novas=${baixadas}`);
   console.log(`    período ${data.meta.first_date} → ${data.meta.last_date}  investido R$${tot.toFixed(2)}`);
+  console.log(`    alcance real: ` + Object.entries(reach.windows).map(([k, w]) => k + "=" + w.acc).join("  "));
   for (const c of campaigns) {
     const rs = daily.filter(r => r.c === c.id);
     const sp = rs.reduce((s, r) => s + r.s, 0);

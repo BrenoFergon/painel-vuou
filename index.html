@@ -366,8 +366,8 @@ const GLOSS = {
   ctr:"CTR (taxa de cliques): de cada 100 pessoas que viram o anúncio, quantas clicaram. Quanto maior, mais o criativo chama atenção.",
   cpc:"CPC (custo por clique): quanto você paga, em média, por cada clique no anúncio.",
   cpm:"CPM (custo por mil): quanto custa para o anúncio aparecer 1.000 vezes na tela.",
-  freq:"Frequência diária: em média, quantas vezes cada pessoa viu o anúncio por dia. Como o painel soma dia a dia, esta é a frequência do dia, não a do período inteiro.",
-  alcance:"Alcance: soma do alcance de cada dia. Quem viu o anúncio em dias diferentes é contado mais de uma vez, então este número é maior que o total de pessoas únicas do período.",
+  freq:"Frequência: em média, quantas vezes cada pessoa alcançada viu o anúncio no período (impressões ÷ alcance).",
+  alcance:"Alcance: quantas pessoas diferentes viram o anúncio no período. Quem viu em vários dias conta uma vez só. Por isso o alcance não pode ser somado dia a dia — ele vem direto da Meta para cada intervalo. Nos intervalos personalizados aparece como — , porque exigiria uma nova consulta à API.",
   impressoes:"Impressões: quantas vezes o anúncio apareceu na tela (pode repetir para a mesma pessoa).",
   seguidores:"Seguidores: novos seguidores do Instagram atribuídos aos anúncios pela Meta (evento instagram_profile_follow).",
   visitas:"Visitas ao perfil: pessoas que abriram o perfil do Instagram depois de ver o anúncio.",
@@ -392,6 +392,17 @@ const PRESETS = [
   ["last_90d","90 dias"], ["this_month","Este mês"], ["all","Tudo"],
 ];
 let DATA = null, TT = null;
+
+/* Alcance é gente única: NÃO some entre dias nem entre campanhas.
+   O número real de cada janela vem da Meta e fica em data.json.reach.windows.
+   Para intervalo personalizado não existe valor pré-calculado → devolve null. */
+function reachFor(scopeId){
+  const w = DATA.reach && DATA.reach.windows && DATA.reach.windows[state.preset];
+  if (!state.preset || !w) return null;
+  if (w.from !== state.from || w.until !== state.to) return null;
+  const v = scopeId ? (w.c || {})[scopeId] : w.acc;
+  return (typeof v === "number") ? v : null;
+}
 const state = { tab: "geral", preset: "last_30d", from: null, to: null, trend: "s", adView: "table" };
 
 /* ─────────── agregação ─────────── */
@@ -550,7 +561,8 @@ function kpisHTML(A){
     cards = [
       { k:"Investimento", v:BRL0(t.s), s:`${A.series.length} dias · ${BRL(t.s/Math.max(A.series.length,1))}/dia` },
       ...porCampanha, ...extras,
-      { k:"Alcance", v:NUM(t.rc),  s:NUM(t.i) + " impr.", hk:"alcance" },
+      { k:"Alcance", v:A.reach===null?"—":NUM(A.reach),
+        s:A.reach===null?"só nos atalhos de período":"pessoas únicas · "+NUM(t.i)+" impr.", hk:"alcance" },
       { k:"CTR",     v:PCT(t.ctr), s:NUM(t.ck) + " cliques", hk:"ctr" },
       { k:"CPC",     v:t.cpc===null?"—":BRL(t.cpc), s:"por clique", hk:"cpc" },
       { k:"CPM",     v:BRL(t.cpm), s:"por mil impr.", hk:"cpm" },
@@ -573,7 +585,8 @@ function kpisHTML(A){
     cards = [
       { k:"Investimento", v:BRL0(t.s), s:`${A.series.length} dias veiculando` },
       main, second, third,
-      { k:"Alcance", v:NUM(t.rc), s:NUM(t.i)+" impr.", hk:"alcance" },
+      { k:"Alcance", v:A.reach===null?"—":NUM(A.reach),
+        s:A.reach===null?"só nos atalhos de período":"pessoas únicas · "+NUM(t.i)+" impr.", hk:"alcance" },
       { k:"CTR", v:PCT(t.ctr), s:NUM(t.ck)+" cliques", hk:"ctr" },
       { k:"CPC", v:t.cpc===null?"—":BRL(t.cpc), s:"por clique", hk:"cpc" },
       { k:"CPM", v:BRL(t.cpm), s:"por mil impr.", hk:"cpm" },
@@ -820,14 +833,14 @@ function diagHTML(A){
       <div class="d"><div class="dk">CPM${hlp("cpm")}</div><div class="dv">${BRL(t.cpm)}</div></div>
       <div class="d"><div class="dk">CTR${hlp("ctr")}</div><div class="dv">${PCT(t.ctr)}</div></div>
       <div class="d"><div class="dk">CPC${hlp("cpc")}</div><div class="dv">${t.cpc===null?"—":BRL(t.cpc)}</div></div>
-      <div class="d"><div class="dk">Frequência diária${hlp("freq")}</div><div class="dv">${DEC(t.freq)}×</div></div>
+      <div class="d"><div class="dk">Frequência${hlp("freq")}</div><div class="dv">${A.freq===null?"—":DEC(A.freq)+"×"}</div></div>
     </div></div>`;
 }
 
 /* ─────────── notas ─────────── */
 function notesHTML(){
   return `<div class="notes">
-    <div class="row"><span>▸</span><div><b>Alcance é soma dos dias.</b> Quem viu o anúncio em dias diferentes é contado mais de uma vez, então o número é maior que o total de pessoas únicas. Por isso a frequência aparece como <b>diária</b>. Investimento, impressões, cliques e resultados são exatos.</div></div>
+    <div class="row"><span>▸</span><div><b>Alcance é gente única e não se soma.</b> Quem vê o anúncio em três dias é uma pessoa, não três — por isso o alcance de um período não é a soma dos dias. O número exibido vem direto da Meta para cada atalho de período; em <b>intervalo personalizado</b> ele aparece como <b>—</b>, porque exigiria uma nova consulta à API. Investimento, impressões, cliques e resultados são somáveis e valem para qualquer intervalo.</div></div>
     <div class="row"><span>▸</span><div><b>Cada campanha é julgada pelo próprio objetivo:</b> ${
       DATA.campaigns.map(c => esc(c.tag) + " por " + esc(c.kpi_unit)).join(", ")} — nunca por CTR.</div></div>
     <div class="row"><span>▸</span><div><b>Criativo com menos de R$20 no período fica fora da comparação</b> melhor/pior. Pouco dado ainda não é sinal.</div></div>
@@ -838,6 +851,8 @@ function notesHTML(){
 /* ─────────── render ─────────── */
 function render(){
   const A = slice();
+  A.reach = reachFor(state.tab === "geral" ? null : state.tab);
+  A.freq  = A.reach ? A.total.i / A.reach : null;
   renderSeg(A); renderPeriod();
 
   const nd = A.series.length;
