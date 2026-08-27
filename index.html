@@ -398,10 +398,11 @@ let DATA = null, TT = null;
    Para intervalo personalizado não existe valor pré-calculado → devolve null. */
 function reachFor(scopeId){
   const w = DATA.reach && DATA.reach.windows && DATA.reach.windows[state.preset];
-  if (!state.preset || !w) return null;
-  if (w.from !== state.from || w.until !== state.to) return null;
+  if (!state.preset || !w) return { v:null, why:"só nos atalhos de período" };
+  if (w.from !== state.from || w.until !== state.to) return { v:null, why:"só nos atalhos de período" };
   const v = scopeId ? (w.c || {})[scopeId] : w.acc;
-  return (typeof v === "number") ? v : null;
+  if (typeof v === "number") return { v, why:null };
+  return { v:null, why: (!scopeId && w.acc_note) ? w.acc_note : "não disponível nesta janela" };
 }
 const state = { tab: "geral", preset: "last_30d", from: null, to: null, trend: "s", adView: "table" };
 
@@ -562,7 +563,7 @@ function kpisHTML(A){
       { k:"Investimento", v:BRL0(t.s), s:`${A.series.length} dias · ${BRL(t.s/Math.max(A.series.length,1))}/dia` },
       ...porCampanha, ...extras,
       { k:"Alcance", v:A.reach===null?"—":NUM(A.reach),
-        s:A.reach===null?"só nos atalhos de período":"pessoas únicas · "+NUM(t.i)+" impr.", hk:"alcance" },
+        s:A.reach===null?A.reachWhy:"pessoas únicas · "+NUM(t.i)+" impr.", hk:"alcance" },
       { k:"CTR",     v:PCT(t.ctr), s:NUM(t.ck) + " cliques", hk:"ctr" },
       { k:"CPC",     v:t.cpc===null?"—":BRL(t.cpc), s:"por clique", hk:"cpc" },
       { k:"CPM",     v:BRL(t.cpm), s:"por mil impr.", hk:"cpm" },
@@ -586,7 +587,7 @@ function kpisHTML(A){
       { k:"Investimento", v:BRL0(t.s), s:`${A.series.length} dias veiculando` },
       main, second, third,
       { k:"Alcance", v:A.reach===null?"—":NUM(A.reach),
-        s:A.reach===null?"só nos atalhos de período":"pessoas únicas · "+NUM(t.i)+" impr.", hk:"alcance" },
+        s:A.reach===null?A.reachWhy:"pessoas únicas · "+NUM(t.i)+" impr.", hk:"alcance" },
       { k:"CTR", v:PCT(t.ctr), s:NUM(t.ck)+" cliques", hk:"ctr" },
       { k:"CPC", v:t.cpc===null?"—":BRL(t.cpc), s:"por clique", hk:"cpc" },
       { k:"CPM", v:BRL(t.cpm), s:"por mil impr.", hk:"cpm" },
@@ -851,7 +852,8 @@ function notesHTML(){
 /* ─────────── render ─────────── */
 function render(){
   const A = slice();
-  A.reach = reachFor(state.tab === "geral" ? null : state.tab);
+  const _r = reachFor(state.tab === "geral" ? null : state.tab);
+  A.reach = _r.v; A.reachWhy = _r.why;
   A.freq  = A.reach ? A.total.i / A.reach : null;
   renderSeg(A); renderPeriod();
 

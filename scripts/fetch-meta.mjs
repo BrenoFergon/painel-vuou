@@ -75,9 +75,14 @@ function pick(actions, types) {
   return 0;
 }
 
+// ATENÇÃO: seguidores e visitas ao perfil NÃO aparecem no array `actions`.
+// São campos próprios. E cuidado: `instagram_profile_follow_v2` (nome usado pelo
+// MCP) é aceito pela API crua e devolvido VAZIO, sem erro — foi o que zerou os
+// seguidores na primeira execução. O nome correto aqui é sem o _v2.
 const IF = [
   "ad_id", "ad_name", "campaign_id", "adset_id", "spend", "impressions", "reach", "clicks",
-  "actions", "video_thruplay_watched_actions", "video_p25_watched_actions",
+  "actions", "instagram_profile_follow", "instagram_profile_visits",
+  "video_thruplay_watched_actions", "video_p25_watched_actions",
   "video_p50_watched_actions", "video_p75_watched_actions", "video_p100_watched_actions",
   "video_play_actions",
 ].join(",");
@@ -96,8 +101,10 @@ function toRow(r) {
   };
 
   // resultado nativo da campanha (o que a Meta chama de "resultado")
-  const visits = pick(a, ["onsite_conversion.ig_profile_visit", "profile_visit_view", "onsite_conversion.ig_profile_engagement"]);
-  const follows = pick(a, ["onsite_conversion.follow", "instagram_profile_follow_v2", "onsite_conversion.ig_profile_follow", "follow"]);
+  const visits = num(r.instagram_profile_visits)
+    || pick(a, ["onsite_conversion.ig_profile_visit", "profile_visit_view"]);
+  const follows = num(r.instagram_profile_follow)
+    || pick(a, ["onsite_conversion.follow", "onsite_conversion.ig_profile_follow", "follow"]);
   const lc = pick(a, ["link_click"]);
 
   const tp   = sumArr(r.video_thruplay_watched_actions);
@@ -161,14 +168,29 @@ async function alcancePorJanela(first, last) {
   const ws = janelas(first, last), out = {};
   for (const [nome, w] of Object.entries(ws)) {
     const time_range = JSON.stringify({ since: w.from, until: w.until });
-    const [acct] = await getAll(`act_${ACCOUNT}/insights`, { level: "account", time_range, fields: "reach" });
+    // nível conta NÃO aceita filtro por campanha (a API recusa). Então o alcance
+    // da conta só vale como "alcance das monitoradas" se mais nada tiver gasto
+    // na janela. Se houver gasto de fora, devolvemos null → o painel mostra "—"
+    // em vez de misturar público de campanhas que o painel não acompanha.
+    const [acct] = await getAll(`act_${ACCOUNT}/insights`, { level: "account", time_range, fields: "reach,spend" });
     const camps = await getAll(`act_${ACCOUNT}/insights`, {
-      level: "campaign", time_range, fields: "campaign_id,reach",
+      level: "campaign", time_range, fields: "campaign_id,reach,spend",
       filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: WATCHED }]),
     });
     const c = {};
-    for (const r of camps) c[r.campaign_id] = num(r.reach);
-    out[nome] = { from: w.from, until: w.until, acc: num(acct?.reach), c };
+    let somaCamp = 0;
+    for (const r of camps) { c[r.campaign_id] = num(r.reach); somaCamp += parseFloat(r.spend || 0); }
+    const gastoConta = parseFloat(acct?.spend || 0);
+    // só interessa gasto EXCEDENTE (conta > campanhas). Diferença negativa ou
+    // de centavos é arredondamento da Meta, não campanha de fora.
+    const excedente = gastoConta - somaCamp;
+    const limite = Math.max(1, gastoConta * 0.005);
+    const soMonitoradas = excedente <= limite;
+    if (!soMonitoradas) {
+      console.warn(`    aviso: janela ${nome} tem R$${excedente.toFixed(2)} gastos fora das campanhas monitoradas — alcance geral omitido`);
+    }
+    out[nome] = { from: w.from, until: w.until, acc: soMonitoradas ? num(acct?.reach) : null, c };
+    if (!soMonitoradas) out[nome].acc_note = `a conta teve R$${excedente.toFixed(0)} fora das campanhas do painel`;
   }
   return { fetched_at: new Date().toISOString(), windows: out };
 }
@@ -220,7 +242,7 @@ async function main() {
     const cid = adById[adId]?.creative?.id;
     if (!cid) continue;
     try {
-      const j = await (await fetch(`${API}/${cid}?fields=thumbnail_url&thumbnail_width=200&thumbnail_height=200&access_token=${TOKEN}`)).json();
+      const j = await (await fetch(`${API}/${cid}?fields=thumbnail_url&thumbnail_width=400&thumbnail_height=400&access_token=${TOKEN}`)).json();
       if (!j.thumbnail_url) continue;
       const ir = await fetch(j.thumbnail_url);
       if (!ir.ok) continue;
@@ -285,12 +307,16 @@ async function main() {
   console.log(`OK  linhas=${daily.length}  anúncios=${ads.length}  capas novas=${baixadas}`);
   console.log(`    período ${data.meta.first_date} → ${data.meta.last_date}  investido R$${tot.toFixed(2)}`);
   console.log(`    alcance real: ` + Object.entries(reach.windows).map(([k, w]) => k + "=" + w.acc).join("  "));
+  let alarme = false;
   for (const c of campaigns) {
     const rs = daily.filter(r => r.c === c.id);
     const sp = rs.reduce((s, r) => s + r.s, 0);
     const kv = rs.reduce((s, r) => s + (r.m?.[c.kpi] ?? r[c.kpi] ?? 0), 0);
-    console.log(`    ${c.tag} R$${sp.toFixed(2).padStart(9)}  ${c.kpi_label}: ${kv}`);
+    const zerado = sp > 0 && kv === 0;
+    if (zerado) alarme = true;
+    console.log(`    ${c.tag} R$${sp.toFixed(2).padStart(9)}  ${c.kpi_label}: ${kv}${zerado ? "   <-- ZERO com verba gasta, confira o nome do campo" : ""}`);
   }
+  if (alarme) console.warn("AVISO: alguma métrica principal veio zerada. A Meta ignora campo inválido em silêncio — confira o nome antes de confiar no dado.");
 }
 
 main().catch(e => { console.error("FALHA:", e.message); process.exit(1); });
