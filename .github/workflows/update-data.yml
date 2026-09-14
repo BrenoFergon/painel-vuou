@@ -1,4 +1,4 @@
-name: Atualizar dados Meta Ads
+name: Atualizar dados Vuou (Meta + Google)
 
 on:
   schedule:
@@ -29,11 +29,23 @@ jobs:
           SINCE: ${{ vars.SINCE }}
         run: node scripts/fetch-meta.mjs
 
+      - name: Puxar Google Ads e gerar data-google.json
+        if: ${{ secrets.GOOGLE_REFRESH_TOKEN != '' }}
+        env:
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_DEVELOPER_TOKEN }}
+          GOOGLE_CUSTOMER_ID: ${{ secrets.GOOGLE_CUSTOMER_ID }}
+          GOOGLE_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_LOGIN_CUSTOMER_ID }}
+          GOOGLE_SINCE: ${{ vars.GOOGLE_SINCE }}
+        run: node scripts/fetch-google.mjs
+
       - name: Commit se houver mudança
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data.json thumbs
+          git add data.json data-google.json thumbs
           if [ -n "$(git status --porcelain)" ]; then
             git commit -m "chore: atualiza dados Vuou ($(date -u '+%Y-%m-%d %H:%M UTC'))"
             git push

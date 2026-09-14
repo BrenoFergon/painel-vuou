@@ -37,11 +37,11 @@ const PLAN = [
     // criada em 2026-09-04 (CRV-C-VV-ENGAJAMENTO-MILHAS-VIAGENS-NORDESTE-04-09-26)
     kpi: "p50", kpi_label: "Viram 50%+ do vídeo", kpi_unit: "visualização 50%",
     kpi2: "tp", kpi2_label: "ThruPlay", kpi2_unit: "ThruPlay" },
-  // { id: "TROCAR", key: "C3", tag: "C3",
-  //   label: "Conversas Iniciadas",
-  //   goal: "Transformar interesse em conversa no direct/WhatsApp.",
-  //   kpi: "conv", kpi_label: "Conversas iniciadas", kpi_unit: "conversa",
-  //   kpi2: "conn", kpi2_label: "Conexões de mensagem", kpi2_unit: "conexão" },
+  { id: "120247691052460489", key: "C3", tag: "C3",
+    label: "Conversas Iniciadas",
+    goal: "Transformar interesse em conversa no direct/WhatsApp.",
+    kpi: "conv", kpi_label: "Conversas iniciadas", kpi_unit: "conversa",
+    kpi2: "conn", kpi2_label: "Conexões de mensagem", kpi2_unit: "conexão" },
 ];
 const WATCHED = PLAN.map(p => p.id);
 
