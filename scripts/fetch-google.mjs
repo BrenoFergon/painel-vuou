@@ -169,6 +169,56 @@ async function main() {
       status: a.status === 2 ? "ENABLED" : "PAUSED",
     }));
 
+  // Palavras-chave (keyword_view)
+  const kwRows = await gaql(token,
+    `SELECT ad_group_criterion.keyword.text,
+            ad_group_criterion.keyword.match_type,
+            campaign.id,
+            metrics.cost_micros,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.conversions
+     FROM keyword_view
+     WHERE campaign.id IN (${campIds})
+       AND segments.date >= '${SINCE}'
+       AND segments.date <= '${until}'`);
+
+  const keywords = kwRows
+    .filter(r => (r.impressions || 0) > 0)
+    .map(r => ({
+      kw: r.text || r.keywordText || r["keyword.text"] || "—",
+      match: r.matchType || r["keyword.matchType"] || "—",
+      c: String(r.campaignId ?? r["campaign.id"] ?? ""),
+      s: micro(Number(r.costMicros || 0)),
+      i: Number(r.impressions || 0),
+      ck: Number(r.clicks || 0),
+      conv: Math.round(Number(r.conversions || 0)),
+    }));
+
+  // Termos de pesquisa (search_term_view)
+  const stRows = await gaql(token,
+    `SELECT search_term_view.search_term,
+            campaign.id,
+            metrics.cost_micros,
+            metrics.impressions,
+            metrics.clicks,
+            metrics.conversions
+     FROM search_term_view
+     WHERE campaign.id IN (${campIds})
+       AND segments.date >= '${SINCE}'
+       AND segments.date <= '${until}'`);
+
+  const search_terms = stRows
+    .filter(r => (r.impressions || 0) > 0)
+    .map(r => ({
+      term: r.searchTerm || r["searchTermView.searchTerm"] || r["search_term"] || "—",
+      c: String(r.campaignId ?? r["campaign.id"] ?? ""),
+      s: micro(Number(r.costMicros || 0)),
+      i: Number(r.impressions || 0),
+      ck: Number(r.clicks || 0),
+      conv: Math.round(Number(r.conversions || 0)),
+    }));
+
   const dates = daily.map(r => r.d);
 
   const data = {
@@ -185,7 +235,7 @@ async function main() {
       first_date: dates[0],
       last_date: dates[dates.length - 1],
     },
-    campaigns, ad_groups, ads, daily,
+    campaigns, ad_groups, ads, daily, keywords, search_terms,
   };
 
   writeFileSync(OUT, JSON.stringify(data) + "\n");

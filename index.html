@@ -410,13 +410,20 @@ let DATA = null, TT = null;
 /* Alcance é gente única: NÃO some entre dias nem entre campanhas.
    O número real de cada janela vem da Meta e fica em data.json.reach.windows.
    Para intervalo personalizado não existe valor pré-calculado → devolve null. */
-function reachFor(scopeId){
+function reachFor(scopeKey){
   const w = DATA.reach && DATA.reach.windows && DATA.reach.windows[state.preset];
   if (!state.preset || !w) return { v:null, why:"só nos atalhos de período" };
   if (w.from !== state.from || w.until !== state.to) return { v:null, why:"só nos atalhos de período" };
-  const v = scopeId ? (w.c || {})[scopeId] : w.acc;
-  if (typeof v === "number") return { v, why:null };
-  return { v:null, why: (!scopeId && w.acc_note) ? w.acc_note : "não disponível nesta janela" };
+  if (!scopeKey) {
+    if (typeof w.acc === "number") return { v:w.acc, why:null };
+    return { v:null, why: w.acc_note || "não disponível nesta janela" };
+  }
+  const camp = DATA.campaigns.find(c => c.key === scopeKey);
+  if (!camp) return { v:null, why:"campanha não encontrada" };
+  const ids = campIds(camp), wc = w.c || {};
+  let sum = 0, found = false;
+  for (const id of ids) if (typeof wc[id] === "number"){ sum += wc[id]; found = true; }
+  return found ? { v:sum, why:null } : { v:null, why:"não disponível nesta janela" };
 }
 const state = { tab: "geral", preset: "last_30d", from: null, to: null, trend: "s", adView: "table" };
 
@@ -450,12 +457,18 @@ function presetRange(k){
     default:           return [first, last];
   }
 }
+/* mapeia campaign_id → key para agrupar múltiplas campanhas por tag */
+function campIds(c){ return c.ids || [c.id]; }
+function campKeyOf(cid){ const c = DATA.campaigns.find(x => campIds(x).includes(cid)); return c ? c.key : cid; }
+
 /* recorte por data + escopo da aba */
 function slice(){
   const rows = DATA.daily.filter(r => r.d >= state.from && r.d <= state.to);
-  const scoped = state.tab === "geral" ? rows : rows.filter(r => r.c === state.tab);
+  const activeCamp = DATA.campaigns.find(c => c.key === state.tab);
+  const activeIds = activeCamp ? campIds(activeCamp) : null;
+  const scoped = state.tab === "geral" ? rows : rows.filter(r => activeIds && activeIds.includes(r.c));
   const total = blank(), byCamp = {}, byAd = {};
-  for (const r of rows) addRow(byCamp[r.c] ||= blank(), r);
+  for (const r of rows){ const k = campKeyOf(r.c); addRow(byCamp[k] ||= blank(), r); }
   for (const r of scoped){ addRow(total, r); addRow(byAd[r.a] ||= blank(), r); }
   derive(total); Object.values(byCamp).forEach(derive); Object.values(byAd).forEach(derive);
   const dayMap = {};
@@ -463,7 +476,7 @@ function slice(){
     const d = dayMap[r.d] ||= { d:r.d, s:0, i:0, ck:0, kpi:0 };
     d.s += r.s; d.i += r.i; d.ck += r.ck;
   }
-  const camp = DATA.campaigns.find(c => c.id === state.tab);
+  const camp = activeCamp;
   if (camp) for (const r of scoped){
     const v = camp.kpi === "conv" ? (r.m?.conv || 0) : (r[camp.kpi] || 0);
     dayMap[r.d].kpi += v;
@@ -476,11 +489,11 @@ function slice(){
 function renderSeg(A){
   const counts = {};
   DATA.campaigns.forEach(c => {
-    counts[c.id] = new Set(A.rows.filter(r => r.c === c.id).map(r => r.a)).size;
+    counts[c.key] = new Set(A.rows.filter(r => campIds(c).includes(r.c)).map(r => r.a)).size;
   });
   const totalAds = new Set(A.rows.map(r => r.a)).size;
   const tabs = [["geral","Visão geral",totalAds]].concat(
-    DATA.campaigns.map(c => [c.id, c.tag + " · " + (c.label.split(" · ")[1] || c.label), counts[c.id]]));
+    DATA.campaigns.map(c => [c.key, c.tag + " · " + (c.label.split(" · ")[1] || c.label), counts[c.key]]));
   if (GDATA) tabs.push(["google","Google Ads",GDATA.ads.length]);
   const el = document.getElementById("seg");
   el.innerHTML = tabs.map(([k,l,n]) =>
@@ -514,14 +527,14 @@ function setCustom(){
 function heroHTML(A){
   const t = A.total, nd = A.series.length;
   if (state.tab === "geral"){
-    const live = DATA.campaigns.filter(c => A.byCamp[c.id] && A.byCamp[c.id].s > 0);
+    const live = DATA.campaigns.filter(c => A.byCamp[c.key] && A.byCamp[c.key].s > 0);
     let ttl = "Sem veiculação no período selecionado", nt = "Escolha outro intervalo ou clique em Tudo.";
     if (t.s > 0){
       const TITULO = { 1:"Uma frente ativa no período", 2:"Duas frentes rodando em paralelo",
                        3:"Três frentes rodando: base, alcance e conversa" };
       ttl = TITULO[live.length] || `${live.length} campanhas ativas no período`;
       const frases = live.map(c => {
-        const a = A.byCamp[c.id], v = a[c.kpi] || 0;
+        const a = A.byCamp[c.key], v = a[c.kpi] || 0;
         return `a <b>${esc(c.tag)}</b> entregou <b>${NUM(v)}</b> ${esc(plural(c.kpi_unit, v))} a ${uCost(a.s, v)} cada`;
       });
       const lista = frases.length > 1
@@ -534,7 +547,7 @@ function heroHTML(A){
       <div class="ttl">${ttl}</div><div class="nt">${nt}</div></div>
       <div class="big"><div class="v tnum">${BRL0(t.s)}</div><div class="l">investidos no período</div></div></div>`;
   }
-  const c = DATA.campaigns.find(x => x.id === state.tab);
+  const c = DATA.campaigns.find(x => x.key === state.tab);
   const v = t[c.kpi] || 0, cst = cost(t.s, v);
   if (t.s === 0) return `<div class="obj"><div>
       <div class="eye">${esc(c.tag)} · ${esc(c.label)}</div>
@@ -562,15 +575,15 @@ function kpisHTML(A){
   if (state.tab === "geral"){
     const HK = { fol:"seguidores", p50:"p50", conv:"conversas", tp:"thruplay", res:"visitas", lc:"linkclick" };
     const porCampanha = DATA.campaigns
-      .filter(c => A.byCamp[c.id] && A.byCamp[c.id].s > 0)
+      .filter(c => A.byCamp[c.key] && A.byCamp[c.key].s > 0)
       .map(c => {
-        const a = A.byCamp[c.id], v = a[c.kpi] || 0;
+        const a = A.byCamp[c.key], v = a[c.kpi] || 0;
         return { k:c.kpi_label, v:NUM(v), s:uCost(a.s, v) + " cada · " + esc(c.tag), hk:HK[c.kpi] };
       });
     /* com poucas campanhas sobra espaço: completa com a métrica secundária de cada uma */
     const extras = porCampanha.length < 3
-      ? DATA.campaigns.filter(c => A.byCamp[c.id] && A.byCamp[c.id].s > 0).map(c => {
-          const a = A.byCamp[c.id], v = a[c.kpi2] || 0;
+      ? DATA.campaigns.filter(c => A.byCamp[c.key] && A.byCamp[c.key].s > 0).map(c => {
+          const a = A.byCamp[c.key], v = a[c.kpi2] || 0;
           return { k:c.kpi2_label, v:NUM(v), s:uCost(a.s, v) + " cada · " + esc(c.tag), hk:HK[c.kpi2] };
         })
       : [];
@@ -584,7 +597,7 @@ function kpisHTML(A){
       { k:"CPM",     v:BRL(t.cpm), s:"por mil impr.", hk:"cpm" },
     ];
   } else {
-    const c = DATA.campaigns.find(x => x.id === state.tab);
+    const c = DATA.campaigns.find(x => x.key === state.tab);
     if (c.key === "C1") {
       cards = [
         { k:"Investimento", v:BRL0(t.s), s:`${A.series.length} dias veiculando` },
@@ -607,15 +620,13 @@ function kpisHTML(A){
         { k:"Retenção 75%", v:PCT(ret75), s:NUM(t.p75||0)+" viram 75%", hk:"ret75" },
       ];
     } else if (c.key === "C3") {
-      const hookRate = t.i > 0 ? (t.pl||0) / t.i * 100 : 0;
-      const ret50 = (t.pl||0) > 0 ? (t.p50||0) / t.pl * 100 : 0;
       cards = [
         { k:"Investimento", v:BRL0(t.s), s:`${A.series.length} dias veiculando` },
         { k:"Mensagens enviadas", v:NUM(t.conv||0), s:uCost(t.s, t.conv||0)+" cada", hk:"conversas" },
         { k:"Custo por mensagem", v:(t.conv||0)>0?BRL(t.s/t.conv):"—", s:NUM(t.conv||0)+" conversas" },
         { k:"CTR", v:PCT(t.ctr), s:NUM(t.ck)+" cliques", hk:"ctr" },
-        { k:"Hook rate", v:PCT(hookRate), s:NUM(t.pl||0)+" repr. 3s / "+NUM(t.i)+" impr.", hk:"hookrate" },
-        { k:"Retenção 50%", v:PCT(ret50), s:NUM(t.p50||0)+" viram 50%", hk:"ret50" },
+        { k:"CPC", v:t.cpc===null?"—":BRL(t.cpc), s:"por clique", hk:"cpc" },
+        { k:"CPM", v:BRL(t.cpm), s:"por mil impr.", hk:"cpm" },
       ];
     } else {
       const HK = { fol:"seguidores", p50:"p50", conv:"conversas", tp:"thruplay", res:"visitas", lc:"linkclick", conn:"conexoes", repl:"resposta" };
@@ -660,7 +671,7 @@ function stagesFor(c, t){
 function funnelHTML(A){
   if (state.tab === "geral"){
     const rows = DATA.campaigns.map(c => {
-      const a = A.byCamp[c.id];
+      const a = A.byCamp[c.key];
       if (!a) return `<div class="cmprow"><div class="cl">${esc(c.tag)}<small>${esc(c.label)}</small></div>
         <div class="bar-track"><div class="bar-fill" style="width:1.5%"></div></div>
         <div class="cr"><div class="cv">—</div><div class="cs">sem veiculação</div></div></div>`;
@@ -681,7 +692,7 @@ function funnelHTML(A){
     return `<div class="panel"><div class="phead"><div><h3>Resultado por campanha</h3>
       <div class="psub">cada campanha no seu próprio objetivo — as barras comparam investimento</div></div></div>${body}</div>`;
   }
-  const c = DATA.campaigns.find(x => x.id === state.tab);
+  const c = DATA.campaigns.find(x => x.key === state.tab);
   const st = stagesFor(c, A.total);
   const top = st[0][1] || 1;
   const body = st.map((s, idx) => {
@@ -710,7 +721,7 @@ function trendMetrics(){
   };
   if (state.tab === "geral") base.ctr = { l:"CTR", fmt:PCT, f:d=>d.i?d.ck/d.i*100:0 };
   else {
-    const c = DATA.campaigns.find(x => x.id === state.tab);
+    const c = DATA.campaigns.find(x => x.key === state.tab);
     base.kpi = { l:c.kpi_label, fmt:NUM, f:d=>d.kpi };
   }
   return base;
@@ -771,10 +782,10 @@ function paintTrend(A){
 /* ─────────── criativos ─────────── */
 const MINSPEND = 20;
 function creativeRows(A){
-  const camps = state.tab === "geral" ? DATA.campaigns : [DATA.campaigns.find(c => c.id === state.tab)];
+  const camps = state.tab === "geral" ? DATA.campaigns : [DATA.campaigns.find(c => c.key === state.tab)];
   const out = [];
   for (const c of camps){
-    const list = DATA.ads.filter(ad => ad.campaign_id === c.id)
+    const list = DATA.ads.filter(ad => campIds(c).includes(ad.campaign_id))
       .map(ad => ({ ad, c, a: A.byAd[ad.id] }))
       .filter(x => x.a && x.a.s > 0)
       .map(x => { const v = x.a[c.kpi] || 0; return { ...x, vol:v, cst:cost(x.a.s, v) }; })
@@ -900,15 +911,17 @@ function render(){
   renderSeg(A); renderPeriod();
 
   const isGoogle = state.tab === "google";
-  document.querySelector(".fgroup").style.display = isGoogle ? "none" : "";
+  document.querySelector(".fgroup").style.display = "";
   document.getElementById("google-section").hidden = true;
 
   if (isGoogle) {
     if (GDATA) {
-      const gd = GDATA.meta;
+      const gRows = GDATA.daily.filter(r => r.d >= state.from && r.d <= state.to);
+      const nd = new Set(gRows.map(r => r.d)).size;
+      const gTot = gRows.reduce((s,r) => s + r.s, 0);
       document.getElementById("rangenote").innerHTML =
-        `Google Ads · Conta <b>${esc(gd.account_id)}</b> · <b>${brD(gd.first_date)}</b> até <b>${brD(gd.last_date)}</b>`;
-      renderGoogle("app");
+        `Google Ads · Conta <b>${esc(GDATA.meta.account_id)}</b> · <b>${nd}</b> ${nd===1?"dia":"dias"} com veiculação · <b>${BRL(gTot)}</b> investidos`;
+      renderGoogle("app", gRows);
     } else {
       document.getElementById("rangenote").innerHTML = "";
       document.getElementById("app").innerHTML =
@@ -918,7 +931,7 @@ function render(){
   }
 
   const nd = A.series.length;
-  const scopeC = DATA.campaigns.find(c => c.id === state.tab);
+  const scopeC = DATA.campaigns.find(c => c.key === state.tab);
   document.getElementById("rangenote").innerHTML =
     `Exibindo <b>${brD(state.from)}</b> até <b>${brD(state.to)}</b> · <b>${nd}</b> ${nd===1?"dia":"dias"} com veiculação · <b>${BRL(A.total.s)}</b> investidos ${scopeC?"em <b>"+esc(scopeC.tag)+"</b>":(DATA.campaigns.length===1?"na campanha":"nas "+DATA.campaigns.length+" campanhas")}${state.preset===null?" · <b>intervalo personalizado</b>":""}`;
 
@@ -937,7 +950,8 @@ function render(){
 
   if (state.tab === "geral" && GDATA) {
     document.getElementById("google-section").hidden = false;
-    renderGoogle();
+    const gRows = GDATA.daily.filter(r => r.d >= state.from && r.d <= state.to);
+    renderGoogle(null, gRows);
   }
 }
 
@@ -982,8 +996,8 @@ fetch("data.json?" + Date.now()).then(r => r.json()).then(d => {
    ═══════════════════════════════════════════════════════════════════════ */
 let GDATA = null;
 
-function renderGoogle(targetId){
-  const d = GDATA, rows = d.daily;
+function renderGoogle(targetId, filteredRows){
+  const d = GDATA, rows = filteredRows || d.daily;
   const tot = {s:0,i:0,ck:0,conv:0};
   for (const r of rows){tot.s+=r.s;tot.i+=r.i;tot.ck+=r.ck;tot.conv+=r.conv;}
   const ctr = tot.i>0?(tot.ck/tot.i*100):0;
@@ -1026,6 +1040,8 @@ function renderGoogle(targetId){
   }
 
   h+=gAdsTableHTML(d,rows);
+  if(d.keywords && d.keywords.length) h+=gKeywordsTableHTML(d.keywords);
+  if(d.search_terms && d.search_terms.length) h+=gSearchTermsTableHTML(d.search_terms);
   document.getElementById(targetId||"google-app").innerHTML=h;
   if(series.length>1)paintGTrend(series);
 }
@@ -1077,6 +1093,54 @@ function gAdsTableHTML(d,rows){
     <div class="scroll"><table><thead><tr>
       <th style="text-align:left">Anúncio</th><th>Investimento</th><th>Impressões</th><th>Cliques</th>
       <th>CTR${hlp("ctr")}</th><th>CPC${hlp("cpc")}</th><th>Conversões</th><th>Custo/Conv</th>
+    </tr></thead><tbody>${tr}</tbody></table></div></div>`;
+}
+
+function gKeywordsTableHTML(keywords){
+  const agg={};
+  for(const r of keywords){
+    const a=agg[r.kw]||={kw:r.kw,match:r.match,s:0,i:0,ck:0,conv:0};
+    a.s+=r.s;a.i+=r.i;a.ck+=r.ck;a.conv+=r.conv;
+  }
+  const sorted=Object.values(agg).sort((a,b)=>b.s-a.s);
+  let tr="";
+  for(const s of sorted){
+    const ctr=s.i>0?(s.ck/s.i*100).toFixed(2)+"%":"—";
+    const cvr=s.ck>0?(s.conv/s.ck*100).toFixed(2)+"%":"—";
+    const cpv=s.conv>0?BRL(s.s/s.conv):"—";
+    tr+=`<tr><td style="text-align:left"><div class="crn">${esc(s.kw)}</div></td>
+      <td>${esc(s.match)}</td><td>${NUM(s.i)}</td><td>${NUM(s.ck)}</td>
+      <td>${ctr}</td><td>${NUM(s.conv)}</td><td>${cvr}</td>
+      <td>${cpv}</td><td>${BRL(s.s)}</td></tr>`;
+  }
+  return `<div class="tblwrap"><div class="tblhead"><h3>Palavras-chave</h3><span class="sub">Performance por keyword configurada</span></div>
+    <div class="scroll"><table><thead><tr>
+      <th style="text-align:left">Palavra-chave</th><th>Corresp.</th><th>Impressões</th><th>Cliques</th>
+      <th>CTR</th><th>Conversões</th><th>Taxa conv.</th><th>Custo/Conv</th><th>Investimento</th>
+    </tr></thead><tbody>${tr}</tbody></table></div></div>`;
+}
+
+function gSearchTermsTableHTML(terms){
+  const agg={};
+  for(const r of terms){
+    const a=agg[r.term]||={term:r.term,s:0,i:0,ck:0,conv:0};
+    a.s+=r.s;a.i+=r.i;a.ck+=r.ck;a.conv+=r.conv;
+  }
+  const sorted=Object.values(agg).sort((a,b)=>b.s-a.s);
+  let tr="";
+  for(const s of sorted){
+    const ctr=s.i>0?(s.ck/s.i*100).toFixed(2)+"%":"—";
+    const cvr=s.ck>0?(s.conv/s.ck*100).toFixed(2)+"%":"—";
+    const cpv=s.conv>0?BRL(s.s/s.conv):"—";
+    tr+=`<tr><td style="text-align:left"><div class="crn">${esc(s.term)}</div></td>
+      <td>${NUM(s.i)}</td><td>${NUM(s.ck)}</td>
+      <td>${ctr}</td><td>${NUM(s.conv)}</td><td>${cvr}</td>
+      <td>${cpv}</td><td>${BRL(s.s)}</td></tr>`;
+  }
+  return `<div class="tblwrap"><div class="tblhead"><h3>Termos de pesquisa</h3><span class="sub">O que as pessoas realmente buscaram no Google</span></div>
+    <div class="scroll"><table><thead><tr>
+      <th style="text-align:left">Termo de pesquisa</th><th>Impressões</th><th>Cliques</th>
+      <th>CTR</th><th>Conversões</th><th>Taxa conv.</th><th>Custo/Conv</th><th>Investimento</th>
     </tr></thead><tbody>${tr}</tbody></table></div></div>`;
 }
 

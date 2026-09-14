@@ -22,6 +22,11 @@ if (!TOKEN) { console.error("ERRO: defina o secret META_TOKEN."); process.exit(1
    painel precisa saber sobre a estratégia). `kpi` é a chave da métrica
    principal dentro de cada linha diária.                                  */
 const PLAN = [
+  { id: "120247500090530489", key: "C1", tag: "C1",
+    label: "Tráfego · Visitas ao Perfil e Seguidores",
+    goal: "Levar público novo ao perfil da Vuou e converter em seguidor.",
+    kpi: "res", kpi_label: "Visitas ao perfil", kpi_unit: "visita",
+    kpi2: "fol", kpi2_label: "Seguidores",      kpi2_unit: "seguidor" },
   { id: "120247706879860489", key: "C1", tag: "C1",
     label: "Tráfego · Visitas ao Perfil e Seguidores",
     goal: "Levar público novo ao perfil da Vuou e converter em seguidor.",
@@ -261,10 +266,20 @@ async function main() {
     return o;
   }).sort((x, y) => x.name.localeCompare(y.name));
 
-  const campaigns = PLAN.map(p => {
+  const seen = new Set();
+  const campaigns = [];
+  for (const p of PLAN) {
+    if (seen.has(p.key)) {
+      const existing = campaigns.find(c => c.key === p.key);
+      existing.ids.push(p.id);
+      const c = campById[p.id] || {};
+      if (c.effective_status === "ACTIVE") existing.status = "ACTIVE";
+      continue;
+    }
+    seen.add(p.key);
     const c = campById[p.id] || {};
-    return {
-      id: p.id, key: p.key, tag: p.tag,
+    campaigns.push({
+      id: p.id, ids: [p.id], key: p.key, tag: p.tag,
       name: c.name || p.label,
       label: p.label, goal: p.goal,
       objective: c.objective || "",
@@ -272,8 +287,8 @@ async function main() {
       daily_budget: c.daily_budget ? Math.round(+c.daily_budget / 100) : null,
       kpi: p.kpi, kpi_label: p.kpi_label, kpi_unit: p.kpi_unit,
       kpi2: p.kpi2, kpi2_label: p.kpi2_label, kpi2_unit: p.kpi2_unit,
-    };
-  });
+    });
+  }
 
   const dates = daily.map(r => r.d);
   const reach = await alcancePorJanela(dates[0], dates[dates.length - 1]);
@@ -305,7 +320,7 @@ async function main() {
   console.log(`    alcance real: ` + Object.entries(reach.windows).map(([k, w]) => k + "=" + w.acc).join("  "));
   let alarme = false;
   for (const c of campaigns) {
-    const rs = daily.filter(r => r.c === c.id);
+    const rs = daily.filter(r => c.ids.includes(r.c));
     const sp = rs.reduce((s, r) => s + r.s, 0);
     const kv = rs.reduce((s, r) => s + (r.m?.[c.kpi] ?? r[c.kpi] ?? 0), 0);
     const zerado = sp > 0 && kv === 0;
