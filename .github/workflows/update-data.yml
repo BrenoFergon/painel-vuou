@@ -30,7 +30,6 @@ jobs:
         run: node scripts/fetch-meta.mjs
 
       - name: Puxar Google Ads e gerar data-google.json
-        if: ${{ secrets.GOOGLE_REFRESH_TOKEN != '' }}
         env:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -39,7 +38,12 @@ jobs:
           GOOGLE_CUSTOMER_ID: ${{ secrets.GOOGLE_CUSTOMER_ID }}
           GOOGLE_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_LOGIN_CUSTOMER_ID }}
           GOOGLE_SINCE: ${{ vars.GOOGLE_SINCE }}
-        run: node scripts/fetch-google.mjs
+        run: |
+          if [ -z "$GOOGLE_REFRESH_TOKEN" ]; then
+            echo "Google Ads secrets não configurados — pulando."
+            exit 0
+          fi
+          node scripts/fetch-google.mjs
 
       - name: Commit se houver mudança
         run: |

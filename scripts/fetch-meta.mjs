@@ -22,19 +22,14 @@ if (!TOKEN) { console.error("ERRO: defina o secret META_TOKEN."); process.exit(1
    painel precisa saber sobre a estratégia). `kpi` é a chave da métrica
    principal dentro de cada linha diária.                                  */
 const PLAN = [
-  { id: "120247500090530489", key: "C1", tag: "C1",
+  { id: "120247706879860489", key: "C1", tag: "C1",
     label: "Tráfego · Visitas ao Perfil e Seguidores",
     goal: "Levar público novo ao perfil da Vuou e converter em seguidor.",
-    // primário = visitas ao perfil (é o que a Meta otimiza aqui e o que tem volume).
-    // Quando a base de seguidores crescer, basta trocar kpi/kpi2 de lugar.
     kpi: "res", kpi_label: "Visitas ao perfil", kpi_unit: "visita",
     kpi2: "fol", kpi2_label: "Seguidores",      kpi2_unit: "seguidor" },
-
-  // ── quando entrarem, é só descomentar e pôr o id da campanha ──
   { id: "120247675795950489", key: "C2", tag: "C2",
     label: "Engajamento · Visualização de Vídeo (milhas)",
     goal: "Fazer os vídeos educativos de milhas serem assistidos — meta principal: quem vê pelo menos 50%.",
-    // criada em 2026-09-04 (CRV-C-VV-ENGAJAMENTO-MILHAS-VIAGENS-NORDESTE-04-09-26)
     kpi: "p50", kpi_label: "Viram 50%+ do vídeo", kpi_unit: "visualização 50%",
     kpi2: "tp", kpi2_label: "ThruPlay", kpi2_unit: "ThruPlay" },
   { id: "120247691052460489", key: "C3", tag: "C3",
