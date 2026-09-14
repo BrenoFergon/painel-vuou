@@ -1106,17 +1106,18 @@ function gKeywordsTableHTML(keywords){
   let tr="";
   for(const s of sorted){
     const ctr=s.i>0?(s.ck/s.i*100).toFixed(2)+"%":"—";
+    const cpc=s.ck>0?BRL(s.s/s.ck):"—";
     const cvr=s.ck>0?(s.conv/s.ck*100).toFixed(2)+"%":"—";
     const cpv=s.conv>0?BRL(s.s/s.conv):"—";
     tr+=`<tr><td style="text-align:left"><div class="crn">${esc(s.kw)}</div></td>
       <td>${esc(s.match)}</td><td>${NUM(s.i)}</td><td>${NUM(s.ck)}</td>
-      <td>${ctr}</td><td>${NUM(s.conv)}</td><td>${cvr}</td>
+      <td>${ctr}</td><td>${cpc}</td><td>${NUM(s.conv)}</td><td>${cvr}</td>
       <td>${cpv}</td><td>${BRL(s.s)}</td></tr>`;
   }
   return `<div class="tblwrap"><div class="tblhead"><h3>Palavras-chave</h3><span class="sub">Performance por keyword configurada</span></div>
     <div class="scroll"><table><thead><tr>
       <th style="text-align:left">Palavra-chave</th><th>Corresp.</th><th>Impressões</th><th>Cliques</th>
-      <th>CTR</th><th>Conversões</th><th>Taxa conv.</th><th>Custo/Conv</th><th>Investimento</th>
+      <th>CTR</th><th>CPC</th><th>Conversões</th><th>Taxa conv.</th><th>Custo/Conv</th><th>Investimento</th>
     </tr></thead><tbody>${tr}</tbody></table></div></div>`;
 }
 
@@ -1130,17 +1131,18 @@ function gSearchTermsTableHTML(terms){
   let tr="";
   for(const s of sorted){
     const ctr=s.i>0?(s.ck/s.i*100).toFixed(2)+"%":"—";
+    const cpc=s.ck>0?BRL(s.s/s.ck):"—";
     const cvr=s.ck>0?(s.conv/s.ck*100).toFixed(2)+"%":"—";
     const cpv=s.conv>0?BRL(s.s/s.conv):"—";
     tr+=`<tr><td style="text-align:left"><div class="crn">${esc(s.term)}</div></td>
       <td>${NUM(s.i)}</td><td>${NUM(s.ck)}</td>
-      <td>${ctr}</td><td>${NUM(s.conv)}</td><td>${cvr}</td>
+      <td>${ctr}</td><td>${cpc}</td><td>${NUM(s.conv)}</td><td>${cvr}</td>
       <td>${cpv}</td><td>${BRL(s.s)}</td></tr>`;
   }
   return `<div class="tblwrap"><div class="tblhead"><h3>Termos de pesquisa</h3><span class="sub">O que as pessoas realmente buscaram no Google</span></div>
     <div class="scroll"><table><thead><tr>
       <th style="text-align:left">Termo de pesquisa</th><th>Impressões</th><th>Cliques</th>
-      <th>CTR</th><th>Conversões</th><th>Taxa conv.</th><th>Custo/Conv</th><th>Investimento</th>
+      <th>CTR</th><th>CPC</th><th>Conversões</th><th>Taxa conv.</th><th>Custo/Conv</th><th>Investimento</th>
     </tr></thead><tbody>${tr}</tbody></table></div></div>`;
 }
 
